@@ -1,0 +1,21 @@
+# mongos.conf
+
+systemLog:
+  destination: file
+  path: /var/log/mongo/mongos.log
+  logAppend: true
+
+processManagement:
+  fork: true
+  pidFilePath: /var/run/mongo/mongos.pid
+
+net:
+  bindIp: localhost,{{ inventory_hostname }}
+  port: {{ mongodb_port }}
+
+security:
+  keyFile: {{ mongodb_data }}/keyfile
+
+sharding:
+   configDB: "mongoc/{{configDB}}"
+

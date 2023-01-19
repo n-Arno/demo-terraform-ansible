@@ -1,0 +1,26 @@
+# mongo.conf
+
+systemLog:
+  destination: file
+  path: /var/log/mongo/mongod{{ shard_index }}.log
+  logAppend: true
+
+storage:
+  dbPath: {{ mongodb_data }}/mongod{{ shard_index }}
+
+processManagement:
+  fork: true
+  pidFilePath: /var/run/mongo/mongod{{ shard_index }}.pid
+
+security:
+  keyFile: {{ mongodb_data }}/keyfile
+
+net:
+  bindIp: localhost,{{ inventory_hostname }}
+  port: {{ shard_port }}
+
+replication:
+  replSetName: {{ shard_name }}
+
+sharding:
+  clusterRole: shardsvr

@@ -1,0 +1,12 @@
+rs.initiate(
+  {
+    _id : "{{ inventory_hostname }}",
+    members: [
+      { _id : 0, host: "{{ inventory_hostname }}:{{ shard_ports[0] }}" },
+      { _id : 1, host: "{{ groups['instances'] | move_in_list(inventory_hostname, 1) }}:{{ shard_ports[1] }}" },
+      { _id : 2, host: "{{ groups['instances'] | move_in_list(inventory_hostname, 2) }}:{{ shard_ports[2] }}" }
+    ]
+  }
+)
+
+printjson(rs.status());

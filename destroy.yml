@@ -1,0 +1,7 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+  - name: Delete infra via terraform (takes about 2 minutes)
+    terraform:
+      project_path: './terraform'
+      state: absent

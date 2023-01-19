@@ -1,0 +1,220 @@
+---
+# tasks file for mongodb
+- name: Install mongodb package
+  apt:
+    name: mongodb-server
+    state: present
+  retries: 3
+  delay: 10
+  register: install
+  until: not install.failed
+- name: Stop mongodb if fresh install
+  systemd:
+    name: mongodb
+    state: stopped
+  when: install.changed
+- name: Remove ootb files and folders if fresh install
+  file:
+    path: "{{ item }}"
+    state: absent
+  when: install.changed
+  register: cleanup
+  with_items:
+  - /etc/init.d/mongodb
+  - /lib/systemd/system/mongodb.service
+  - /etc/mongodb.conf
+  - /var/log/mongodb
+  - /var/lib/mongodb
+- name: Reload systemd unit files
+  systemd:
+    daemon_reload: yes
+  when: cleanup.changed
+- name: Create new data folder
+  file:
+    path: "{{ mongodb_data }}"
+    state: directory
+    owner: mongodb
+    group: mongodb
+    mode: "755"
+  register: result
+- name: Switch mongodb user home folder
+  shell: sed -i 's|/var/lib/mongodb|{{ mongodb_data }}|g' /etc/passwd
+  when: result.changed
+- name: Add mount point in /etc/fstab
+  lineinfile:
+    path: /etc/fstab
+    line: "/dev/sda1       {{ mongodb_data }}  xfs   defaults        0 0"
+    state: present
+  register: result
+- name: Mount data partition if added to /etc/fstab
+  shell: mount -a
+  when: result.changed
+- name: Create needed folders
+  file: 
+    path: "{{ item }}"
+    state: directory
+    owner: mongodb
+    group: mongodb
+    mode: "755"
+  with_items:
+  - /var/log/mongo
+  - /var/run/mongo
+  - "{{ mongodb_data }}/mongoc"
+  - "{{ mongodb_data }}/mongod1"
+  - "{{ mongodb_data }}/mongod2"
+  - "{{ mongodb_data }}/mongod3"
+- name: Copy provided key file
+  copy:
+    src: "{{ pwd }}/keyfile"
+    dest: "{{ mongodb_data }}/keyfile"
+    owner: mongodb
+    group: mongodb
+    mode: "400"
+- name: Create mongod1 files
+  vars:
+    shard_index: 1
+    shard_name: "{{ inventory_hostname }}"
+    shard_port: "{{ shard_ports[0] }}"
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  with_items:
+  - src: mongod.conf.j2
+    dest: /etc/mongod1.conf
+    owner: mongodb
+    mode: "640"
+  - src: mongod.service.j2
+    dest: /etc/systemd/system/mongod1.service
+    owner: root
+    mode: "655"
+  - src: mongod_init.js.j2
+    dest: "{{ mongodb_data }}/mongod_init.js"
+    owner: mongodb
+    mode: "640"
+- name: Create mongod2 files
+  vars:
+    shard_index: 2
+    shard_name: "{{ groups['instances'] | move_in_list(inventory_hostname, -1) }}"
+    shard_port: "{{ shard_ports[1] }}"
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  with_items:
+  - src: mongod.conf.j2
+    dest: /etc/mongod2.conf
+    owner: mongodb
+    mode: "640"
+  - src: mongod.service.j2
+    dest: /etc/systemd/system/mongod2.service
+    owner: root
+    mode: "655"
+- name: Create mongod3 files
+  vars:
+    shard_index: 3
+    shard_name: "{{ groups['instances'] | move_in_list(inventory_hostname, -2) }}"
+    shard_port: "{{ shard_ports[2] }}"
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  with_items:
+  - src: mongod.conf.j2
+    dest: /etc/mongod3.conf
+    owner: mongodb
+    mode: "640"
+  - src: mongod.service.j2
+    dest: /etc/systemd/system/mongod3.service
+    owner: root
+    mode: "655"
+- name: Start mongod services
+  systemd:
+    name: "{{ item }}"
+    state: started
+    daemon-reload: yes
+    enabled: yes
+  with_items:
+  - mongod1
+  - mongod2
+  - mongod3
+- name: Initiate Shards ReplicaSets
+  shell: /usr/bin/mongo "localhost:{{ shard_ports[0] }}/admin" {{ mongodb_data }}/mongod_init.js && touch {{ mongodb_data }}/mongod_init.done && chown mongodb:mongodb {{ mongodb_data }}/mongod_init.done
+  args:
+    creates: "{{ mongodb_data }}/mongod_init.done"
+- name: Create mongoc files
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  with_items:
+  - src: mongoc.conf.j2
+    dest: /etc/mongoc.conf
+    owner: mongodb
+    mode: "640"
+  - src: mongoc.service.j2
+    dest: /etc/systemd/system/mongoc.service
+    owner: root
+    mode: "655"
+- name: Start mongoc service
+  systemd:
+    name: mongoc
+    state: started
+    daemon-reload: yes
+    enabled: yes
+- name: Copy mongoc init file (once)
+  template:
+    src: mongoc_init.js.j2
+    dest: "{{ mongodb_data }}/mongoc_init.js"
+    owner: mongodb
+    group: mongodb
+    mode: "640"
+  when: inventory_hostname == groups['instances'][0]
+- name: Init Config Cluster ReplicaSet
+  shell: /usr/bin/mongo "localhost:{{ mongoc_port }}/admin" {{ mongodb_data }}/mongoc_init.js && touch {{ mongodb_data }}/mongoc_init.done && chown mongodb:mongodb {{ mongodb_data }}/mongoc_init.done
+  args:
+    creates: "{{ mongodb_data }}/mongoc_init.done"
+  when: inventory_hostname == groups['instances'][0]
+- name: Create mongos files
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  with_items:
+  - src: mongos.conf.j2
+    dest: /etc/mongos.conf
+    owner: mongodb
+    mode: "640"
+  - src: mongos.service.j2
+    dest: /etc/systemd/system/mongos.service
+    owner: root
+    mode: "655"
+- name: Start mongos service
+  systemd:
+    name: mongos
+    state: started
+    daemon-reload: yes
+    enabled: yes
+- name: Copy mongos init file (once)
+  template:
+    src: mongos_init.js.j2
+    dest: "{{ mongodb_data }}/mongos_init.js"
+    owner: mongodb
+    group: mongodb
+    mode: "640"
+  when: inventory_hostname == groups['instances'][0]
+- name: Init Cluster Shards
+  shell: /usr/bin/mongo "localhost:{{ mongodb_port }}/admin" {{ mongodb_data }}/mongos_init.js && touch {{ mongodb_data }}/mongos_init.done && chown mongodb:mongodb {{ mongodb_data }}/mongos_init.done
+  args:
+    creates: "{{ mongodb_data }}/mongos_init.done"
+  when: inventory_hostname == groups['instances'][0]

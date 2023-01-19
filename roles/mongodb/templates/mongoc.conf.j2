@@ -1,0 +1,25 @@
+systemLog:
+  destination: file
+  path: "/var/log/mongo/mongoc.log"
+  logAppend: true
+
+# fork and run in background
+processManagement:
+  fork: true
+  pidFilePath: /var/run/mongo/mongoc.pid
+
+net:
+  bindIp: localhost,{{ inventory_hostname }}
+  port: {{ mongoc_port }}
+
+storage:
+  dbPath: {{ mongodb_data }}/mongoc
+
+security:
+  keyFile: {{ mongodb_data }}/keyfile
+
+sharding:
+  clusterRole: configsvr
+
+replication:
+  replSetName: mongoc

@@ -1,0 +1,13 @@
+rs.initiate(
+  {
+    _id: "mongoc",
+    configsvr: true,
+    members: [
+    {% for instance in groups['instances'] %}
+      { _id : {{loop.index}}, host: "{{instance}}:{{mongoc_port}}" },
+    {% endfor %}
+    ]
+  }
+)
+
+printjson(rs.status());

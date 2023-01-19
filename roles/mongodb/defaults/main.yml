@@ -1,0 +1,16 @@
+---
+# defaults file for mongodb
+mongodb_data: /opt/mongo-data
+mongodb_port: 27017
+mongoc_port: 27010
+shard_ports:
+- 27011
+- 27012
+- 27013
+configDB: "
+  {%- set hosts = [] -%}
+  {%- for host in groups['instances'] -%}
+    {{- hosts.append( host ~ ':' ~ mongoc_port) }}
+  {%- endfor %}
+  {{- hosts | join(',') -}}"
+mongo_admin_pass: admin123

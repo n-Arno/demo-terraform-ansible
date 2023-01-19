@@ -1,0 +1,63 @@
+- name: Install Infrastructure
+  hosts: localhost
+  gather_facts: false
+  vars:
+    scale: 3
+  tasks:
+  - name: Build infra using terraform (takes about 3 minutes)
+    terraform:
+      project_path: './terraform'
+      state: present
+      force_init: true
+      variables:
+        scale: "{{ scale }}"
+    register: result
+  - name: Store loadbalancer IP as fact
+    set_fact:
+      loadbalancer: "{{ result.outputs.loadbalancer.value }}"
+  - name: Create in memory inventory
+    add_host:
+      groups: instances
+      hostname: "{{ item.key }}"
+      ansible_host: "{{ item.value }}"
+      ansible_user: "root"
+      ansible_ssh_extra_args: "{{ result.outputs.bastion.value }}"
+    loop: "{{ result.outputs.instances.value | dict2items }}"
+  - name: Create local inventory for later use
+    lineinfile:
+      create: yes
+      path: ./inventory
+      line: "{{ item.key }} ansible_host={{ item.value }} ansible_user=root ansible_ssh_extra_args='{{ result.outputs.bastion.value }}'"
+    loop: "{{ result.outputs.instances.value | dict2items }}"
+- name: Wait for reboot
+  hosts: instances
+  gather_facts: false
+  tasks:
+  - name: Wait for reboot
+    wait_for_connection:
+      connect_timeout: 60
+      sleep: 5
+      delay: 5
+      timeout: 300
+- name: Install MongoDB
+  hosts: instances
+  vars:
+    mongo_admin_pass: scaleway
+  pre_tasks:
+  - name: Create data partition
+    parted:
+      device: /dev/sda
+      number: 1
+      state: present
+      fs_type: xfs
+    register: result
+  - name: Format partition if newly created
+    shell: mkfs -t xfs /dev/sda1
+    when: result.changed
+  roles:
+  - mongodb
+  post_tasks:
+  - name: Display connection method
+    run_once: yes
+    debug:
+      msg: mongo -u admin -p {{ mongo_admin_pass }} "{{ hostvars['localhost']['loadbalancer'] }}:{{ mongodb_port}}/test" --shell
